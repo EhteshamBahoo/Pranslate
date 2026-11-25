@@ -1,5 +1,18 @@
 import type { TranslateRequest, TranslateResult, TranslationProvider } from "./provider";
 
+/** Accepts the shapes small models commonly emit; returns null if it can't produce exactly n strings. */
+export function coerceTranslations(parsed: unknown, n: number): string[] | null {
+  let v: unknown = parsed;
+  if (v && typeof v === "object" && !Array.isArray(v) && "translations" in v) v = (v as { translations: unknown }).translations;
+  if (typeof v === "string" && n === 1) v = [v];
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const o = v as Record<string, unknown>;
+    v = Object.keys(o).sort((a, b) => Number(a) - Number(b)).map((k) => o[k]);
+  }
+  if (!Array.isArray(v) || v.length !== n || !v.every((x) => typeof x === "string")) return null;
+  return v as string[];
+}
+
 export const LANG_NAME: Record<string, string> = { ja: "Japanese", en: "English" };
 
 export interface OllamaOptions {
@@ -44,11 +57,10 @@ export class OllamaProvider implements TranslationProvider {
     });
     if (!r.ok) throw new Error(`Ollama responded ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const j = (await r.json()) as { message?: { content?: string } };
-    const parsed = JSON.parse(j.message?.content ?? "{}") as { translations?: unknown };
-    const arr = parsed.translations;
-    if (!Array.isArray(arr) || arr.length !== req.segments.length || !arr.every((x) => typeof x === "string")) {
-      throw new Error("Model returned an unexpected shape (count mismatch). Try again or use a larger model.");
-    }
-    return { segments: arr as string[] };
+    let parsed: unknown;
+    try { parsed = JSON.parse(j.message?.content ?? "{}"); } catch { throw new Error("Model returned invalid JSON."); }
+    const arr = coerceTranslations(parsed, req.segments.length);
+    if (!arr) throw new Error("Model returned an unexpected shape (count mismatch).");
+    return { segments: arr };
   }
 }

@@ -4,6 +4,7 @@ import { parseSlideSelection } from "../extract/slideRange";
 import { OllamaProvider } from "../translate/ollama";
 import { createFixture, probeSelectedShape, runS1 } from "../../spikes/s1/s1";
 import { readActiveSlideText } from "../office/textAccess";
+import { scanSelectedSlide } from "../../spikes/scan";
 
 type Dir = "ja-en" | "en-ja";
 const DEFAULT_MODEL = "qwen2.5:7b"; // assumption: reasonable ja<->en quality at 7B; unverified on this machine
@@ -44,11 +45,15 @@ export function App({ diag }: { diag: string }) {
     try {
       const s = await translateSlides(sel.slides, provider(), src!, dst!, setProgress, abort.current.signal);
       setCanRestore(hasSavedOriginals());
-      setStatus({
-        text: `Done: ${s.paragraphsChanged} paragraphs in ${s.shapesChanged} text boxes across ${s.slidesDone} slide(s).` +
-          (s.warnings.length ? ` ${s.warnings.join(" ")}` : "") + " Check long text for overflow.",
-        kind: s.warnings.length ? "" : "ok",
-      });
+      const skipped = Object.entries(s.skippedByType).map(([k, v]) => `${v}× ${k}`).join(", ");
+      const parts = [
+        s.textItems === 0 ? "No translatable text found." : `Done: ${s.paragraphsChanged} paragraphs in ${s.textItems} text items across ${s.slidesDone} slide(s).`,
+        s.paragraphsFailed ? `${s.paragraphsFailed} paragraph(s) could not be translated and were left as-is.` : "",
+        skipped ? `Skipped (not editable by this add-in): ${skipped}.` : "",
+        ...s.warnings,
+        s.textItems ? "Check long text for overflow." : "",
+      ].filter(Boolean);
+      setStatus({ text: parts.join(" "), kind: s.paragraphsFailed || s.warnings.length || skipped ? "" : "ok" });
     } catch (e) {
       setCanRestore(hasSavedOriginals());
       setStatus({ text: `Stopped: ${String(e)}`, kind: "err" });
@@ -124,6 +129,7 @@ export function App({ diag }: { diag: string }) {
           <button className="secondary" disabled={busy} onClick={dev(createFixture)}>S1 · 1. Create fixture slide</button>
           <button className="secondary" disabled={busy} onClick={dev(probeSelectedShape)}>S1 · 2. Probe selected text box</button>
           <button className="secondary" disabled={busy} onClick={dev(runS1)}>S1 · 3. Run (modifies fixture slide)</button>
+          <button className="secondary" disabled={busy} onClick={dev(scanSelectedSlide)}>Scan selected slide structure</button>
           <button className="secondary" disabled={busy} onClick={dev(readActiveSlideText)}>Read selected slide</button>
         </div>
         <textarea readOnly value={devOut} onFocus={(e) => e.currentTarget.select()} />
